@@ -36,6 +36,30 @@ model: opus
 - 문단 간 논리 흐름이 끊기지 않는가.
 - 읽을 때 걸리는 지점(어색한 어순·불필요한 쉼표·비문)이 있는가.
 
+#### 축 3-보조: Gemini 블라인드 "제3의 독자" 투표 (선택 — 자기채점 편향 제거)
+자기(Claude)가 윤문하고 자기가 자연도를 채점하면 편향이 생긴다. 이를 완화하기 위해
+윤문본(`03_rewrite.md`)만을 **원문·탐지결과 없이 블라인드로** Gemini 3.1 Pro에 보여
+"이 글, 사람이 쓴 것 같나 AI가 쓴 것 같나 + 어색한 지점"만 한 표(vote) 받는다.
+**Gemini는 한 명의 익명 독자 투표일 뿐, 최종 판정은 Claude가 세 축을 종합해 내린다.**
+
+```bash
+GEMINI=~/.claude/skills/lib/gemini_call.sh
+PF=$(mktemp)
+{ echo "아래 한국어 글을 처음 읽는 독자로서 판정하라. 다른 정보는 없다."
+  echo "1) 사람이 쓴 글 같은가, AI가 쓴 글 같은가 (사람/AI/애매 중 하나)."
+  echo "2) AI 티가 나거나 어색하게 읽히는 문장을 최대 3개만 그대로 인용."
+  echo "설명은 짧게. 너는 채점자가 아니라 익명 독자 한 명의 투표다."
+  echo "---"; cat "_workspace/${run_id}/03_rewrite.md"; } > "$PF"
+bash "$GEMINI" --model pro --promptfile "$PF" --fallback fail --timeout 120 2>/dev/null || echo "(gemini 투표 스킵)"
+rm -f "$PF"
+```
+
+투표 반영 규칙:
+- Gemini가 "AI 같다"로 투표 + 인용한 문장이 축1(탐지기) 잔존과 **겹치면** → 해당 finding 심각도 판단에 가중(우선 재윤문 후보).
+- Gemini가 지목했으나 탐지기·Claude 판단엔 없던 문장 → `unclassified_candidates`에 후보로만 올리고 분류학자 에스컬레이션(자동 재작성 금지).
+- Gemini 응답이 비거나 실패하면 이 축은 없던 것으로 간주(가용성 하드의존 금지).
+- 메타에 `gemini_reader_vote`(사람/AI/애매/skip)를 기록하되, **verdict 최종 결정은 Claude**가 축1~3 종합으로.
+
 ## 판정 매트릭스
 
 | 잔존 | 과윤문 | 판정 | 후속 조치 |
