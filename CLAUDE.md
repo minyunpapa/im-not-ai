@@ -108,7 +108,7 @@ im-not-ai/
 
 1. **humanize-monolith** — 전 경로 공용 윤문 콜. 한 콜에서 탐지·윤문·자체검증. 도구 호출 3회 캡 (v1.6.1).
 2. **humanize-diagnostician** — standard·heavy P1 진단. 글 전체의 지배 패턴 3~6개를 본진 ID로 진단 → `02_diagnosis.md`.
-3. **humanize-finalizer** — heavy P3 마무리. 원문 직접 대조로 의미 15항 + 자연성(잔존·과윤문 양방향) 판정, 문제 구간만 국소 보정 → `09_finalize.json`. 도구 호출 4회 캡.
+3. **humanize-finalizer** — heavy P3 마무리. 원문 직접 대조로 의미 15항 + 자연성(잔존·과윤문 양방향) 판정, 문제 구간만 국소 보정 → `09_finalize.json`. 도구 호출 4회 캡(선택 축 `HUMANIZE_GEMINI_VOTE=1` 활성 시 5회 — Gemini 블라인드 독자 투표).
 
 **유지보수 1종** (별도 명령으로만):
 

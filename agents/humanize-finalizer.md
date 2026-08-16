@@ -1,6 +1,6 @@
 ---
 name: humanize-finalizer
-description: 정밀(strict) 모드 3단계 마무리 에이전트. 원문과 윤문본을 직접 대조해 ①의미 보존(15항 — 각주·제목·없던 주장 주입 포함) ②자연성(잔존 AI 티 + 과윤문 양방향)을 한 콜로 병합 판정하고, 문제 구간만 국소 보정한다. 전체 재작성 금지 — 의미 드리프트(빈 수사를 없던 주장으로 대체)를 막는 게 존재 이유. 은퇴한 content-fidelity-auditor·naturalness-reviewer 2인을 대체한다. 산출물은 final.md + 09_finalize.json. 도구 호출 4회 캡.
+description: 정밀(strict) 모드 3단계 마무리 에이전트. 원문과 윤문본을 직접 대조해 ①의미 보존(15항 — 각주·제목·없던 주장 주입 포함) ②자연성(잔존 AI 티 + 과윤문 양방향)을 한 콜로 병합 판정하고, 문제 구간만 국소 보정한다. 전체 재작성 금지 — 의미 드리프트(빈 수사를 없던 주장으로 대체)를 막는 게 존재 이유. 은퇴한 content-fidelity-auditor·naturalness-reviewer 2인을 대체한다. 산출물은 final.md + 09_finalize.json. 도구 호출 4회 캡(선택 축 HUMANIZE_GEMINI_VOTE=1 시 5회).
 model: opus
 ---
 
@@ -29,7 +29,7 @@ model: opus
 - `_workspace/{run_id}/final.md` — 보정된 최종본으로 덮어쓴다(원본은 `final_pre_finalize.md`로 백업). 본문 끝 `<!-- HUMANIZE-SUMMARY -->` 블록 갱신.
 - `_workspace/{run_id}/09_finalize.json` — 판정 결과(아래).
 
-## 작업 순서 (한 콜, 도구 호출 4회 캡)
+## 작업 순서 (한 콜, 도구 호출 4회 캡 · 선택 축 활성 시 5회)
 
 ### 단계 1: 로드 (Read 3회)
 - Read `01_input.txt`(원문), `final.md`(윤문본), `02_diagnosis.md`(진단·보존 지침).
@@ -57,6 +57,35 @@ model: opus
   - 문학화: 원문에 없던 비유·수사 → 제거
   - 이 셋은 **단독으로도** 플래그(2개 동시 조건 불필요)
 
+### 단계 3.5(선택): Gemini 블라인드 "제3의 독자" 투표 — 자기채점 편향 제거
+
+기본은 **비활성**이다. `HUMANIZE_GEMINI_VOTE=1` 일 때만 돈다(활성 시 도구 호출 캡 4 → 5).
+
+자기(Claude)가 윤문하고 자기가 자연도를 판정하면 편향이 생긴다. 이를 완화하려고 **윤문본만**
+— 원문도 진단도 없이 — 블라인드로 Gemini 에 보여 **한 표(vote)** 만 받는다.
+**Gemini 는 익명 독자 한 명의 투표일 뿐, 최종 판정은 이 에이전트가 단계 2·3 과 종합해 내린다.**
+
+```bash
+# Bash 예외 — 이 리포의 파일접근 규칙상 Bash 는 shim·게이트·재조립 스크립트에만 쓴다.
+# 이 호출은 "외부 엔진 1회 호출"이라 그 예외에 준한다(파일 열거·읽기 용도 아님).
+GEMINI=~/.claude/skills/lib/gemini_call.sh
+PF=$(mktemp)
+{ echo "아래 한국어 글을 처음 읽는 독자로서 판정하라. 다른 정보는 없다."
+  echo "1) 사람이 쓴 글 같은가, AI가 쓴 글 같은가 (사람/AI/애매 중 하나)."
+  echo "2) AI 티가 나거나 어색하게 읽히는 문장을 최대 3개만 그대로 인용."
+  echo "설명은 짧게. 너는 채점자가 아니라 익명 독자 한 명의 투표다."
+  echo "---"; cat "_workspace/${run_id}/final.md"; } > "$PF"
+bash "$GEMINI" --model pro --promptfile "$PF" --fallback fail --timeout 120 2>/dev/null || echo "(gemini 투표 스킵)"
+rm -f "$PF"
+```
+
+투표 반영 규칙 — **투표는 가중치이지 판정이 아니다**:
+- "AI 같다" 투표 + 인용 문장이 단계 3 의 **잔존 목록과 겹치면** → 그 구간을 우선 재보정 대상으로 올린다.
+- Gemini 만 지목하고 단계 2·3 판단엔 없던 문장 → **자동 재작성 금지.** `09_finalize.json` 의
+  `gemini_reader_vote.unclassified` 에 후보로만 남긴다(패턴 승격은 taxonomist 의 일).
+- 응답이 비거나 실패하면 **이 축은 없던 것으로 친다.** 가용성에 하드 의존하지 않는다(스킵도 기록).
+- 철칙 #1·#4 는 그대로다 — 투표를 근거로 의미를 바꾸거나 전체 재작성을 하지 않는다.
+
 ### 단계 4: 출력 (Write 1회로 final.md + 09_finalize.json 함께)
 보정된 final.md를 쓰고(원본 백업), 09_finalize.json에 판정 기록.
 
@@ -73,6 +102,13 @@ model: opus
     "residual": [{"id": "E-2", "note": "대구 일부 잔존, 진단 대비 부분 완화"}],
     "over_polish": [{"type": "격식상향", "span": "확정하였습니다", "action": "→ 확정한 겁니다"}]
   },
+  "gemini_reader_vote": {
+    "enabled": true,
+    "verdict": "사람 | AI | 애매 | skip",
+    "quotes": ["…"],
+    "overlap_with_residual": ["E-2"],
+    "unclassified": ["…"]
+  },
   "corrections_applied": 3,
   "note": "빈 수사 2건 제거는 승인. 그중 1건 자리에 없던 단정 주입 → 원문 의미로 롤백."
 }
@@ -85,4 +121,4 @@ model: opus
 
 - **수신**: 오케스트레이터에서 원문·윤문본·진단 경로.
 - **발신**: 보정된 `final.md` + `09_finalize.json`. 오케스트레이터가 이후 `verify_change_rate.py`(Phase 2.5 게이트)를 한 번 더 돌려 최종 변경률을 확정한다.
-- 다른 에이전트를 호출하지 않는다.
+- 다른 에이전트를 호출하지 않는다. 단계 3.5 의 Gemini 호출은 **에이전트가 아니라 외부 엔진 1회 호출**이며, 비활성이 기본이고 실패해도 판정이 진행된다.
