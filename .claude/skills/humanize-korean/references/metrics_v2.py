@@ -634,6 +634,60 @@ def antithesis_count(text: str) -> int:
     return len(_ANTITHESIS_RE.findall(text))
 
 
+# --- C-13 줄바꿈 = 의미 단위 (v2.4, 사용자 지시 2026-08-18) ---------------
+# 문장이 끝나지 않았는데 줄이 바뀌는 자리를 센다. 한국어 종결부(다./요./까?/!)
+# 나 마크업(불릿·헤딩·표·코드펜스)으로 끝나지 않은 줄 다음에 개행이 오면
+# '문장 중간 개행'이다. 리스트·표·코드는 의도적 구조라 제외한다.
+_SENT_END_RE = re.compile(r"(?:[.!?…]|다|요|죠|까|음|함|임|][)\]}]?)\s*$")
+_STRUCT_LINE_RE = re.compile(
+    r"^\s*(?:#{1,6}\s|[-*+•·]\s|\d{1,3}[.)]\s|>|\||```|~~~|\[|!\[)"
+)
+
+
+def midsentence_break_count(text: str) -> int:
+    """C-13 문장 중간 개행 건수.
+
+    ⚠️ 절대치로 등급을 매기지 마라 — 표·리스트가 많은 문서는 자연히 높다.
+    before/after 대조로 '줄바꿈이 의미 단위로 재배치됐는지'를 보는 진단 앵커다.
+    """
+    if not text.strip():
+        return 0
+    lines = text.split("\n")
+    n = 0
+    for i, ln in enumerate(lines[:-1]):
+        cur = ln.rstrip()
+        nxt = lines[i + 1].strip()
+        if not cur or not nxt:            # 빈 줄 = 의도적 문단 경계
+            continue
+        if _STRUCT_LINE_RE.match(cur) or _STRUCT_LINE_RE.match(nxt):
+            continue                      # 구조(리스트·표·코드·헤딩)는 제외
+        if not _SENT_END_RE.search(cur):
+            n += 1
+    return n
+
+
+def topic_shift_without_blank(text: str) -> int:
+    """C-13 반대 방향 — 화제 전환 표지로 시작하는데 앞에 빈 줄이 없는 자리.
+
+    '다만·반면·그런데·한편·문제는·정리하면' 등으로 새 논점이 열리는데 바로
+    앞줄에 붙어 있으면, 읽는 사람이 전환을 놓친다.
+    """
+    if not text.strip():
+        return 0
+    shift = re.compile(r"^\s*(?:다만|반면|그런데|한편|하지만|문제는|정리하면|결론|그래서|따라서)\b")
+    lines = text.split("\n")
+    n = 0
+    for i in range(1, len(lines)):
+        if not shift.match(lines[i]):
+            continue
+        if lines[i - 1].strip() == "":     # 이미 빈 줄로 끊겨 있다
+            continue
+        if _STRUCT_LINE_RE.match(lines[i]) or _STRUCT_LINE_RE.match(lines[i - 1]):
+            continue
+        n += 1
+    return n
+
+
 # ---------------------------------------------------------------------------
 # === CHANGE RATE (철칙 #4 게이트 SSOT) ===
 # ---------------------------------------------------------------------------
